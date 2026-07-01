@@ -1,0 +1,40 @@
+services:
+  node1:
+    build: .
+    container_name: node1
+    environment:
+      NODE_ID: node1
+      SELF_URL: http://node1:8000
+      PEERS: node2=http://node2:8000,node3=http://node3:8000
+    ports:
+      - "8501:8501"
+    networks:
+      - playlist_net
+
+  node2:
+    build: .
+    container_name: node2
+    environment:
+      NODE_ID: node2
+      SELF_URL: http://node2:8000
+      PEERS: node1=http://node1:8000,node3=http://node3:8000
+    ports:
+      - "8502:8501"
+    networks:
+      - playlist_net
+
+  node3:
+    build: .
+    container_name: node3
+    environment:
+      NODE_ID: node3
+      SELF_URL: http://node3:8000
+      PEERS: node1=http://node1:8000,node2=http://node2:8000
+    ports:
+      - "8503:8501"
+    networks:
+      - playlist_net
+
+networks:
+  playlist_net:
+    driver: bridge
