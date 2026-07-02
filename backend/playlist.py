@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -24,18 +25,29 @@ class Playlist:
     Consistência entre nós é responsabilidade dos algoritmos distribuídos.
     """
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.songs: list[Song] = _mock_songs()
         self.is_playing: bool = False
         self.current_song_id: Optional[str] = None
 
     def add_song(self, song: Song, position: Optional[int] = None) -> None:
-        #todo: implementar a inserção de música na fila
-        pass
+        """Insere uma música na fila (ao final ou numa posição específica)."""
+        with self._lock:
+            if position is None:
+                self.songs.append(song)
+            else:
+                self.songs.insert(position, song)
 
     def remove_song(self, song_id: str) -> bool:
-        #todo: implementar a remoção de música da fila
-        pass
+        """Remove uma música pelo id. Retorna True se removeu."""
+        with self._lock:
+            before = len(self.songs)
+            self.songs = [s for s in self.songs if s.id != song_id]
+            return len(self.songs) < before
 
-    def set_playing(self, is_playing: bool) -> None:
-        #todo: implementar a atualização do estado de reprodução
-        pass
+    def set_playing(self, playing: bool, song_id: Optional[str] = None) -> None:
+        """Atualiza o estado de reprodução."""
+        with self._lock:
+            self.is_playing = playing
+            if song_id is not None:
+                self.current_song_id = song_id
