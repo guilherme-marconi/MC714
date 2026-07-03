@@ -5,6 +5,7 @@ services:
     environment:
       NODE_ID: node1
       PEERS: '{"node2": "http://node2:8000", "node3": "http://node3:8000"}'
+      NODES_JSON: '{"node1": "http://node1:8000", "node2": "http://node2:8000", "node3": "http://node3:8000"}'
     ports:
       - "8501:8501"
     networks:
@@ -16,6 +17,7 @@ services:
     environment:
       NODE_ID: node2
       PEERS: '{"node1": "http://node1:8000", "node3": "http://node3:8000"}'
+      NODES_JSON: '{"node1": "http://node1:8000", "node2": "http://node2:8000", "node3": "http://node3:8000"}'
     ports:
       - "8502:8501"
     networks:
@@ -27,6 +29,7 @@ services:
     environment:
       NODE_ID: node3
       PEERS: '{"node1": "http://node1:8000", "node2": "http://node2:8000"}'
+      NODES_JSON: '{"node1": "http://node1:8000", "node2": "http://node2:8000", "node3": "http://node3:8000"}'
     ports:
       - "8503:8501"
     networks:

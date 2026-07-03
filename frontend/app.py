@@ -1,9 +1,18 @@
 import html
+import json
+import os
 
 import requests
 import streamlit as st
 
-NODES = {"n1": "http://localhost:8001","n2": "http://localhost:8002","n3": "http://localhost:8003"}
+# No Docker o docker-compose injeta NODES_JSON com os nomes de serviço (node1:8000 etc.).
+# Sem essa env (rodando local), cai no padrão localhost:8001/8002/8003.
+DEFAULT_NODES = {
+    "n1": "http://localhost:8001",
+    "n2": "http://localhost:8002",
+    "n3": "http://localhost:8003",
+}
+NODES = json.loads(os.environ.get("NODES_JSON", json.dumps(DEFAULT_NODES)))
 
 GREEN = "#1DB954"
 GREEN_LIGHT = "#1ED760"
