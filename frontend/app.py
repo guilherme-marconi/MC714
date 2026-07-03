@@ -22,6 +22,7 @@ LINE = "#282828"
 TEXT = "#FFFFFF"
 TEXT_MUTED = "#B3B3B3"
 RED = "#E22134"
+YELLOW = "#E2B21A"
 
 REQ_TIMEOUT = 2    
 ACT_TIMEOUT = 5     
@@ -48,6 +49,25 @@ def post_action(node_url: str, path: str, payload: dict | None = None):
             return True, {}
     except requests.exceptions.RequestException as exc:
         return False, str(exc)
+
+
+KIND_COLORS = {
+    "lamport": "#4FADEA",
+    "mutex": "#E29A2E",
+    "election": "#B980F0",
+    "playlist": GREEN,
+    "admin": "#9AA0A6",
+}
+
+
+def fetch_events(node_url: str) -> list:
+    """Lê GET /events de um nó. Retorna a lista (vazia se o nó não responder)."""
+    try:
+        resp = requests.get(f"{node_url}/events", timeout=REQ_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json().get("events", [])
+    except requests.exceptions.RequestException:
+        return []
 
 
 def _song_title(songs: list, song_id) -> str:
@@ -77,11 +97,17 @@ def render_node_card(node_id: str, state: dict | None) -> str:
     current_id = state.get("current_song_id")
     songs = state.get("songs", []) or []
 
-    border = GREEN if is_leader else LINE
-    if is_leader:
+    alive = bool(state.get("alive", True))
+    if not alive:
+        border = YELLOW
+        badge = ('<span style="background:#E2B21A;color:#000;padding:2px 10px;'
+                 'border-radius:12px;font-size:12px;font-weight:700;">💀 KILLED</span>')
+    elif is_leader:
+        border = GREEN
         badge = (f'<span style="background:{GREEN};color:#000;padding:2px 10px;'
                  f'border-radius:12px;font-size:12px;font-weight:700;">★ LEADER</span>')
     else:
+        border = LINE
         leader_label = html.escape(str(leader)) if leader else "—"
         badge = f'<span style="color:{TEXT_MUTED};font-size:12px;">leader: {leader_label}</span>'
 
@@ -195,6 +221,22 @@ with st.sidebar:
         else:
             st.error(f"Failed: {result}")
 
+    st.markdown("#### 💀 Falha & eleição")
+    col_kill, col_revive = st.columns(2)
+    if col_kill.button("Kill", use_container_width=True):
+        post_action(target_url, "/admin/kill")
+        st.warning(f"{target} morto (simulado). Os outros vão reeleger.")
+    if col_revive.button("Revive", use_container_width=True):
+        post_action(target_url, "/admin/revive")
+        st.success(f"{target} revivido — vai reentrar na eleição.")
+
+    st.markdown("#### 🐢 Câmera-lenta")
+    delay = st.slider("Delay por operação (s)", 0.0, 3.0, 0.0, 0.5)
+    if st.button("Aplicar em todos os nós", use_container_width=True):
+        for url in NODES.values():
+            post_action(url, "/admin/config", {"step_delay": delay})
+        st.info(f"Delay = {delay:.1f}s em todos os nós.")
+
     st.divider()
     if st.button("🔄 Refresh now", use_container_width=True):
         st.rerun()
@@ -208,12 +250,41 @@ st.markdown(
 )
 
 
-@st.fragment(run_every=2)
-def state_panel():
+@st.fragment(run_every=1)
+def live_panel():
     columns = st.columns(len(NODES))
     for column, (node_id, url) in zip(columns, NODES.items()):
         with column:
             st.markdown(render_node_card(node_id, fetch_state(url)), unsafe_allow_html=True)
 
+    st.markdown("### 📜 Timeline de eventos")
+    st.caption("Ordenada pelo relógio lógico de Lamport · mais recentes no topo")
 
-state_panel()
+    todos = []
+    for node_id, url in NODES.items():
+        todos.extend(fetch_events(url))
+    todos.sort(key=lambda e: (e.get("lamport") if e.get("lamport") is not None else -1, e.get("ts", 0)))
+
+    linhas = []
+    for e in reversed(todos[-40:]):
+        cor = KIND_COLORS.get(e.get("kind"), TEXT)
+        lam = e.get("lamport")
+        lam_txt = f"L{lam}" if lam is not None else "L—"
+        node = html.escape(str(e.get("node_id", "")))
+        kind = html.escape(str(e.get("kind", "")))
+        detail = html.escape(str(e.get("detail", "")))
+        linhas.append(
+            f'<div style="padding:3px 8px;border-left:3px solid {cor};margin-bottom:3px;'
+            f'font-family:monospace;font-size:13px;background:{CARD};">'
+            f'<span style="color:{TEXT_MUTED};">[{lam_txt}]</span> '
+            f'<b style="color:{cor};">{node}</b> '
+            f'<span style="color:{cor};">{kind}</span>'
+            f'<span style="color:{TEXT};"> — {detail}</span></div>'
+        )
+    st.markdown(
+        "".join(linhas) or '<div style="color:#777;">(sem eventos ainda)</div>',
+        unsafe_allow_html=True,
+    )
+
+
+live_panel()
