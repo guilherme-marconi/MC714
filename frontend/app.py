@@ -184,10 +184,16 @@ with st.sidebar:
     col_play, col_pause = st.columns(2)
     if col_play.button("Play", use_container_width=True):
         ok, result = post_action(target_url, "/actions/play")
-        st.success(f"Play sent to {target}.") if ok else st.error(f"Failed: {result}")
+        if ok:
+            st.success(f"Play sent to {target}.")
+        else:
+            st.error(f"Failed: {result}")
     if col_pause.button("Pause", use_container_width=True):
         ok, result = post_action(target_url, "/actions/pause")
-        st.success(f"Pause sent to {target}.") if ok else st.error(f"Failed: {result}")
+        if ok:
+            st.success(f"Pause sent to {target}.")
+        else:
+            st.error(f"Failed: {result}")
 
     st.divider()
     if st.button("🔄 Refresh now", use_container_width=True):
