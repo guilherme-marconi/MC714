@@ -2,6 +2,8 @@ import threading
 import time
 import requests
 
+from backend import eventos
+
 
 class Election:
     def __init__(self, node_id: str, peers: dict[str, str]) -> None:
@@ -17,6 +19,8 @@ class Election:
             if self._in_election:
                 return
             self._in_election = True
+
+        eventos.log_eleicao("START", "procurando nós de id maior")
 
         higher_responded = False
         for peer_id, base_url in self.peers.items():
@@ -35,6 +39,8 @@ class Election:
         with self._lock:
             self.leader = self.node_id
 
+        eventos.log_eleicao("LEADER", f"{self.node_id} virou lider")
+
         for peer_id, base_url in self.peers.items():
             if peer_id < self.node_id:
                 self._send_coordinator(base_url, self.node_id)
@@ -48,6 +54,7 @@ class Election:
         with self._lock:
             self.leader = leader_id
             self._in_election = False
+        eventos.log_eleicao("COORDINATOR", f"lider = {leader_id}")
 
 
     def monitor_leader(self) -> None:
@@ -58,6 +65,7 @@ class Election:
             if current_leader == self.node_id:
                 continue
             if current_leader is None or not self._ping(current_leader):
+                eventos.log_eleicao("DETECT", f"lider {current_leader} inacessivel")
                 self.start_election()
 
 

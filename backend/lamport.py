@@ -1,5 +1,7 @@
 import threading
 
+from backend import eventos
+
 
 class LamportClock:
     """Relógio de Lamport
@@ -17,7 +19,9 @@ class LamportClock:
         """
         with self._lock:
             self._time += 1
-            return self._time
+            valor = self._time
+        eventos.log_lamport(valor, "tick")
+        return valor
 
     def update(self, received_time: int) -> int:
         """Atualiza o relógio ao receber uma mensagem de outro processo.
@@ -26,7 +30,9 @@ class LamportClock:
         """
         with self._lock:
             self._time = max(self._time, received_time) + 1
-            return self._time
+            valor = self._time
+        eventos.log_lamport(valor, f"update(recv={received_time})")
+        return valor
 
     def now(self) -> int:
         """Retorna o timestamp atual do processo.

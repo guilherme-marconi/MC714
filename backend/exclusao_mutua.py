@@ -1,6 +1,7 @@
 import threading
 import requests
 from backend.lamport import LamportClock
+from backend import eventos
 
 RELEASED = "RELEASED"
 WANTED = "WANTED"
@@ -36,6 +37,9 @@ class ExclusaoMutua:
             self._ok_received = set()
             self._event.clear()
 
+        eventos.log_mutex("REQUEST", f"pedindo acesso (ts={self._request_timestamp})",
+                          lamport=self._request_timestamp)
+
         for peer_id, base_url in self.peers.items():
             self._send_request(base_url, self._request_timestamp, self.node_id)
 
@@ -43,6 +47,7 @@ class ExclusaoMutua:
 
         with self._lock:
             self._state = HELD
+        eventos.log_mutex("ENTER", "entrou na secao critica")
 
 
     def release_access(self) -> None:
@@ -50,6 +55,8 @@ class ExclusaoMutua:
             self._state = RELEASED
             deferred_copy = list(self._deferred)
             self._deferred.clear()
+
+        eventos.log_mutex("RELEASE", "liberou a secao critica")
 
         for peer_id in deferred_copy:
             base_url = self.peers.get(peer_id)
@@ -64,17 +71,23 @@ class ExclusaoMutua:
             if self._state == HELD:
                 self._deferred.append(sender_id)
                 grant = False
+                motivo = "estou HELD"
             elif self._state == WANTED and self.has_priority(
                     self._request_timestamp, self.node_id, timestamp, sender_id):
                 self._deferred.append(sender_id)
                 grant = False
+                motivo = "minha prioridade e maior"
             else:
                 grant = True
+                motivo = ""
 
         if grant:
+            eventos.log_mutex("OK", f"liberou {sender_id}")
             base_url = self.peers.get(sender_id)
             if base_url:
                 self._send_ok(base_url, self.node_id)
+        else:
+            eventos.log_mutex("DEFER", f"adiou {sender_id} ({motivo})")
 
 
     def on_ok(self, sender_id: str) -> None:
