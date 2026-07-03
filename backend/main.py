@@ -1,10 +1,12 @@
 import json
 import os
+import threading
 
 import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from backend import controle, eventos
 from backend.eleicao import Election
 from backend.exclusao_mutua import ExclusaoMutua
 from backend.lamport import LamportClock
@@ -58,6 +60,16 @@ class CoordinatorMsg(BaseModel):
     leader_id: str
 
 
+class ConfigRequest(BaseModel):
+    step_delay: float = 0.0
+
+
+def _exige_vivo() -> None:
+    """Kill simulado: se o nó está 'morto', responde 503 nas rotas internas."""
+    if not controle.esta_vivo():
+        raise HTTPException(status_code=503, detail=f"{NODE_ID} esta morto (simulado).")
+
+
 def replicate_to_peers(payload: dict) -> None:
     for peer_id, base_url in PEERS.items():
         try:
@@ -74,7 +86,9 @@ def _player_command(playing: bool) -> dict:
         current = playlist.current_song_id
         if playing and current is None and playlist.songs:
             current = playlist.songs[0].id
+        controle.esperar()
         playlist.set_playing(playing, current)
+        eventos.log_playlist(op.upper(), "confirmado pelo lider", lamport=timestamp)
         replicate_to_peers({"op": op, "timestamp": timestamp, "current_song_id": current})
         return {"ok": True, "confirmed_by": NODE_ID}
 
@@ -90,11 +104,14 @@ def _player_command(playing: bool) -> dict:
 
 @app.post("/actions/add")
 def action_add(req: AddSongRequest) -> dict:
+    _exige_vivo()
     mutex.request_access()
     try:
+        controle.esperar()
         timestamp = clock.tick()
         song_id = f"s{timestamp}-{NODE_ID}"
         playlist.add_song(Song(id=song_id, title=req.title, artist=req.artist), req.position)
+        eventos.log_playlist("ADD", f"{req.title} — {req.artist}", lamport=timestamp)
         replicate_to_peers({
             "op": "add",
             "timestamp": timestamp,
@@ -108,10 +125,13 @@ def action_add(req: AddSongRequest) -> dict:
 
 @app.post("/actions/remove")
 def action_remove(req: RemoveSongRequest) -> dict:
+    _exige_vivo()
     mutex.request_access()
     try:
+        controle.esperar()
         timestamp = clock.tick()
         removed = playlist.remove_song(req.song_id)
+        eventos.log_playlist("REMOVE", f"id={req.song_id}", lamport=timestamp)
         replicate_to_peers({
             "op": "remove",
             "timestamp": timestamp,
@@ -124,16 +144,19 @@ def action_remove(req: RemoveSongRequest) -> dict:
 
 @app.post("/actions/play")
 def action_play() -> dict:
+    _exige_vivo()
     return _player_command(playing=True)
 
 
 @app.post("/actions/pause")
 def action_pause() -> dict:
+    _exige_vivo()
     return _player_command(playing=False)
 
 
 @app.post("/replicate")
 def replicate(req: ReplicateRequest) -> dict:
+    _exige_vivo()
     clock.update(req.timestamp)
     if req.op == "add" and req.song is not None:
         playlist.add_song(
@@ -146,6 +169,7 @@ def replicate(req: ReplicateRequest) -> dict:
         playlist.set_playing(True, req.current_song_id)
     elif req.op == "pause":
         playlist.set_playing(False)
+    eventos.log_playlist("REPLICATE", f"op={req.op}", lamport=req.timestamp)
     return {"ok": True}
 
 
@@ -159,35 +183,68 @@ def get_state() -> dict:
         "is_playing": playlist.is_playing,
         "current_song_id": playlist.current_song_id,
         "songs": songs,
+        "alive": controle.esta_vivo(),
+        "step_delay": controle.get_delay(),
     }
+
+
+@app.get("/events")
+def get_events(since: int = 0) -> dict:
+    evs = eventos.listar(since)
+    last = evs[-1]["seq"] if evs else since
+    return {"events": evs, "last_seq": last}
+
+
+@app.post("/admin/kill")
+def admin_kill() -> dict:
+    controle.matar()
+    return {"alive": False, "node_id": NODE_ID}
+
+
+@app.post("/admin/revive")
+def admin_revive() -> dict:
+    controle.reviver()
+    threading.Thread(target=election.start_election, daemon=True).start()
+    return {"alive": True, "node_id": NODE_ID}
+
+
+@app.post("/admin/config")
+def admin_config(req: ConfigRequest) -> dict:
+    controle.set_delay(req.step_delay)
+    return {"step_delay": controle.get_delay()}
 
 
 @app.post("/mutex/request")
 def mutex_request(req: MutexRequest) -> dict:
+    _exige_vivo()
     mutex.on_request(req.sender_id, req.timestamp)
     return {"status": "received"}
 
 
 @app.post("/mutex/ok")
 def mutex_ok(req: MutexOk) -> dict:
+    _exige_vivo()
     mutex.on_ok(req.sender_id)
     return {"status": "received"}
 
 
 @app.post("/election")
 def election_message(req: ElectionMsg) -> dict:
+    _exige_vivo()
     election.receive_election(req.sender_id)
     return {"status": "alive"}
 
 
 @app.post("/coordinator")
 def coordinator_message(req: CoordinatorMsg) -> dict:
+    _exige_vivo()
     election.receive_coordinator(req.leader_id)
     return {"status": "received"}
 
 
 @app.get("/health")
 def health() -> dict:
+    _exige_vivo()
     return {"status": "ok"}
 
 
