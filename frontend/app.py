@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import threading
 
 import requests
 import streamlit as st
@@ -68,6 +69,26 @@ def fetch_events(node_url: str) -> list:
         return resp.json().get("events", [])
     except requests.exceptions.RequestException:
         return []
+
+
+def disparar_em_paralelo(reqs: list) -> None:
+    """Dispara vários POST /actions/* no MESMO instante, direto da UI.
+
+    Uma Barrier faz os threads saírem juntos; não esperamos a resposta (as
+    ações seguram a seção crítica pela câmera-lenta). A timeline mostra o
+    resultado do conflito (REQUEST/DEFER/ENTER/RELEASE).
+    """
+    barreira = threading.Barrier(len(reqs))
+
+    def _um(url: str, path: str, payload: dict) -> None:
+        try:
+            barreira.wait(timeout=5)
+            requests.post(f"{url}{path}", json=payload, timeout=30)
+        except Exception:
+            pass
+
+    for url, path, payload in reqs:
+        threading.Thread(target=_um, args=(url, path, payload), daemon=True).start()
 
 
 def _song_title(songs: list, song_id) -> str:
@@ -250,6 +271,57 @@ st.markdown(
 )
 
 
+with st.expander("⚔️ Teste de conflito (forçar exclusão mútua)", expanded=False):
+    st.caption("A própria UI dispara dois requests /actions/* no mesmo instante (um por nó). "
+               "O Ricart-Agrawala arbitra quem entra primeiro na seção crítica.")
+    _node_ids = list(NODES.keys())
+    _c1, _c2 = st.columns(2)
+    conf_a = _c1.selectbox("Nó A", _node_ids, index=0, key="conf_a")
+    conf_b = _c2.selectbox("Nó B", _node_ids, index=min(1, len(_node_ids) - 1), key="conf_b")
+
+    conf_modo = st.radio("Ação", ["Remover a mesma música", "Ambos adicionam"],
+                         horizontal=True, key="conf_modo")
+    conf_song_id = None
+    conf_title_a = conf_title_b = None
+    if conf_modo == "Remover a mesma música":
+        _estado_a = fetch_state(NODES[conf_a]) or {}
+        _songs = _estado_a.get("songs", []) or []
+        if _songs:
+            _opcoes = {f'{s.get("title")} — {s.get("artist")}': s.get("id") for s in _songs}
+            _escolha = st.selectbox("Música que os dois vão remover", list(_opcoes.keys()), key="conf_song")
+            conf_song_id = _opcoes[_escolha]
+        else:
+            st.info("Nó A sem músicas na fila (ou offline).")
+    else:
+        conf_title_a = st.text_input("Música do Nó A", "Faixa A", key="conf_ta")
+        conf_title_b = st.text_input("Música do Nó B", "Faixa B", key="conf_tb")
+
+    conf_hold = st.number_input("Câmera-lenta durante (s)", min_value=0.0, max_value=4.0,
+                                value=2.0, step=0.5, key="conf_hold",
+                                help="Segura a seção crítica pra dar tempo de ver o DEFER do outro nó.")
+
+    if st.button("⚔️ Disparar conflito", use_container_width=True, key="conf_go"):
+        if conf_a == conf_b:
+            st.error("Escolha dois nós diferentes.")
+        elif conf_modo == "Remover a mesma música" and not conf_song_id:
+            st.error("Selecione uma música (Nó A precisa ter fila).")
+        else:
+            for _url in NODES.values():
+                post_action(_url, "/admin/config", {"step_delay": conf_hold})
+            if conf_modo == "Remover a mesma música":
+                _reqs = [
+                    (NODES[conf_a], "/actions/remove", {"song_id": conf_song_id}),
+                    (NODES[conf_b], "/actions/remove", {"song_id": conf_song_id}),
+                ]
+            else:
+                _reqs = [
+                    (NODES[conf_a], "/actions/add", {"title": conf_title_a, "artist": conf_a}),
+                    (NODES[conf_b], "/actions/add", {"title": conf_title_b, "artist": conf_b}),
+                ]
+            disparar_em_paralelo(_reqs)
+            st.success(f"Disparado! {conf_a} e {conf_b} foram no mesmo instante. Veja DEFER/ENTER na timeline.")
+
+
 @st.fragment(run_every=1)
 def live_panel():
     columns = st.columns(len(NODES))
@@ -258,12 +330,12 @@ def live_panel():
             st.markdown(render_node_card(node_id, fetch_state(url)), unsafe_allow_html=True)
 
     st.markdown("### 📜 Timeline de eventos")
-    st.caption("Ordenada pelo relógio lógico de Lamport · mais recentes no topo")
+    st.caption("Ordem de chegada · L = relógio de Lamport · mais recentes no topo")
 
     todos = []
     for node_id, url in NODES.items():
         todos.extend(fetch_events(url))
-    todos.sort(key=lambda e: (e.get("lamport") if e.get("lamport") is not None else -1, e.get("ts", 0)))
+    todos.sort(key=lambda e: e.get("ts", 0))
 
     linhas = []
     for e in reversed(todos[-40:]):
