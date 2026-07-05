@@ -7,7 +7,7 @@ Prof. Luiz Fernando Bittencourt — 2º Trabalho
 | | |
 |---|---|
 | **Integrante** | Guilherme Marconi Mugnai — RA 241277 |
-| **Integrante** | Jonatas Santos Da Silva — RA 225334 |
+| **Integrante** | Jonatas de Sousa Santos — RA 225334 |
 | **Vídeo**        | https://youtu.be/I36wsJ20EJs |
 
 ---
